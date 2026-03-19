@@ -1,0 +1,8 @@
+[target.i686-pc-windows-msvc]
+linker = "lld-link"
+rustflags = [
+    "-Clinker-flavor=msvc",
+    "-Lnative=./xwinSDK/crt/lib/x86",
+    "-Lnative=./xwinSDK/sdk/lib/ucrt/x86",
+    "-Lnative=./xwinSDK/sdk/lib/um/x86",
+]
