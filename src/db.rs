@@ -198,3 +198,34 @@ pub unsafe extern "fastcall" fn script_hdb_close(l: LuaState) -> u32 {
     free_handle(h);
     0
 }
+
+pub unsafe extern "fastcall" fn script_hdb_execute(l: LuaState) -> u32 {
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
+        lua::lua_error(l, "Usage: HDB_Execute(handle, sql)");
+        return 0;
+    }
+
+    let h = lua::lua_tonumber(l, 1) as usize;
+    let sql = match lua::lua_tostring(l, 2) {
+        Some(s) => s,
+        None => {
+            lua::lua_error(l, "HDB_Execute: sql is nil");
+            return 0;
+        }
+    };
+
+    let result = with_handle(h, |db| db.execute_batch(&sql));
+    match result {
+        None => {
+            lua::lua_error(l, "HDB_Execute: invalid handle");
+        }
+        Some(Err(e)) => {
+            let msg = format!("HDB_Execute: {}", e);
+            lua::lua_error(l, &msg);
+        }
+        Some(Ok(())) => {}
+    }
+    0
+}
