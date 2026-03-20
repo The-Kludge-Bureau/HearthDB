@@ -343,7 +343,6 @@ pub unsafe extern "fastcall" fn script_hdb_query_raw(_l: LuaState) -> u32 {
     2
 }
 
-#[allow(dead_code)]
 pub unsafe extern "fastcall" fn script_hdb_open_addon(_l: LuaState) -> u32 {
     let l = lua::get_lua_state();
 
