@@ -229,3 +229,71 @@ pub unsafe extern "fastcall" fn script_hdb_execute(l: LuaState) -> u32 {
     }
     0
 }
+
+pub unsafe extern "fastcall" fn script_hdb_query(l: LuaState) -> u32 {
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
+        lua::lua_error(l, "Usage: HDB_Query(handle, sql)");
+        return 0;
+    }
+
+    let h = lua::lua_tonumber(l, 1) as usize;
+    let sql = match lua::lua_tostring(l, 2) {
+        Some(s) => s,
+        None => {
+            lua::lua_error(l, "HDB_Query: sql is nil");
+            return 0;
+        }
+    };
+
+    let rows_result: Option<Result<Vec<Vec<(String, Option<String>)>>, rusqlite::Error>> =
+        with_handle(h, |db| {
+            let mut stmt = db.prepare(&sql)?;
+            let col_names: Vec<String> = stmt
+                .column_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let col_count = col_names.len();
+            let mut rows: Vec<Vec<(String, Option<String>)>> = Vec::new();
+            let mut query = stmt.query([])?;
+            while let Some(row) = query.next()? {
+                let mut r = Vec::with_capacity(col_count);
+                for (i, name) in col_names.iter().enumerate() {
+                    let val: Option<String> = row.get(i).ok();
+                    r.push((name.clone(), val));
+                }
+                rows.push(r);
+            }
+            Ok(rows)
+        });
+
+    match rows_result {
+        None => {
+            lua::lua_error(l, "HDB_Query: invalid handle");
+            return 0;
+        }
+        Some(Err(e)) => {
+            let msg = format!("HDB_Query: {}", e);
+            lua::lua_error(l, &msg);
+            return 0;
+        }
+        Some(Ok(rows)) => {
+            lua::lua_newtable(l);
+            for (row_idx, row) in rows.iter().enumerate() {
+                lua::lua_newtable(l);
+                for (col_name, val) in row {
+                    lua::lua_pushstring(l, col_name);
+                    match val {
+                        Some(s) => lua::lua_pushstring(l, s),
+                        None    => lua::lua_pushnil(l),
+                    }
+                    lua::lua_settable(l, -3);
+                }
+                lua::lua_rawseti(l, -2, (row_idx + 1) as i32);
+            }
+        }
+    }
+    1
+}
