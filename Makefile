@@ -16,7 +16,7 @@ export RUSTFLAGS := \
     -Lnative=$(XWIN_SDK)/sdk/lib/ucrt/x86 \
     -Lnative=$(XWIN_SDK)/sdk/lib/um/x86
 
-.PHONY: all release debug clean
+.PHONY: all release debug check clean
 
 all: release
 
@@ -25,6 +25,9 @@ release:
 
 debug:
 	cargo build --target $(TRIPLE)
+
+check:
+	cargo check --target $(TRIPLE)
 
 clean:
 	cargo clean
