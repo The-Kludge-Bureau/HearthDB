@@ -57,8 +57,14 @@ Up to 32 databases may be open simultaneously.
 
 ### Build
 
+Use `make` rather than invoking `cargo` directly. The Makefile sets the
+required `CC` and `CFLAGS` environment variables with absolute paths so
+that the C compiler (used by `minhook` and `rusqlite`) can locate the
+xwinSDK headers regardless of its working directory.
+
 ```bash
-cargo build --release --target i686-pc-windows-msvc
+make          # release build (default)
+make debug    # debug build
 ```
 
 Output: `target/i686-pc-windows-msvc/release/HearthDB.dll`
