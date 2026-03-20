@@ -117,3 +117,84 @@ unsafe fn resolve_db_path(filename: &str) -> Option<String> {
 
     Some(cand)
 }
+
+// ---------------------------------------------------------------------------
+// Lua script functions
+// ---------------------------------------------------------------------------
+
+pub unsafe extern "fastcall" fn script_hdb_open(l: LuaState) -> u32 {
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 1 || !lua::lua_isstring(l, 1) {
+        lua::lua_error(l, "Usage: HDB_Open(filename)");
+        return 0;
+    }
+
+    let filename = match lua::lua_tostring(l, 1) {
+        Some(s) => s,
+        None => {
+            lua::lua_error(l, "HDB_Open: filename is nil");
+            return 0;
+        }
+    };
+
+    if !is_valid_filename(&filename) {
+        lua::lua_error(l, "HDB_Open: invalid filename (must not contain < > : \" / \\ | ? *)");
+        return 0;
+    }
+
+    if !ensure_custom_data_dir() {
+        lua::lua_error(l, "HDB_Open: could not create CustomData directory");
+        return 0;
+    }
+
+    let full_path = match resolve_db_path(&filename) {
+        Some(p) => p,
+        None => {
+            lua::lua_error(l, "HDB_Open: path must remain inside CustomData");
+            return 0;
+        }
+    };
+
+    let db = match Connection::open(&full_path) {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = format!("HDB_Open: {}", e);
+            lua::lua_error(l, &msg);
+            return 0;
+        }
+    };
+
+    match alloc_handle(db) {
+        Some(h) => {
+            lua::lua_pushnumber(l, h as f64);
+            1
+        }
+        None => {
+            lua::lua_error(l, "HDB_Open: too many open databases (max 32)");
+            0
+        }
+    }
+}
+
+pub unsafe extern "fastcall" fn script_hdb_close(l: LuaState) -> u32 {
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 1 || !lua::lua_isnumber(l, 1) {
+        lua::lua_error(l, "Usage: HDB_Close(handle)");
+        return 0;
+    }
+
+    let h = lua::lua_tonumber(l, 1) as usize;
+    let valid = {
+        let handles = HANDLES.lock().unwrap();
+        handles.get(h.wrapping_sub(1)).map_or(false, |s| s.is_some())
+    };
+    if !valid {
+        lua::lua_error(l, "HDB_Close: invalid or already-closed handle");
+        return 0;
+    }
+
+    free_handle(h);
+    0
+}
