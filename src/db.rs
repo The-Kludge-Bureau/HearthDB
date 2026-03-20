@@ -142,6 +142,12 @@ pub unsafe extern "fastcall" fn script_hdb_open(_l: LuaState) -> u32 {
         }
     };
 
+    if let Err(e) = db.execute_batch("PRAGMA journal_mode=WAL;") {
+        let msg = format!("HDB_Open: could not enable WAL mode: {}", e);
+        lua::lua_error(l, &msg);
+        return 0;
+    }
+
     match alloc_handle(db) {
         Some(h) => {
             lua::lua_pushnumber(l, h as f64);
