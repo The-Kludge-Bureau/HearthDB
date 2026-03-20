@@ -44,6 +44,38 @@ to close handles will eventually exhaust the 32-slot limit.
 `#` length operator. Use `table.getn(t)` to get the number of rows returned
 by `HDB_Query` and `HDB_QueryRaw`.
 
+**Atomicity and transactions.** Each SQL statement passed to `HDB_Execute`
+that is not inside an explicit `BEGIN`/`COMMIT` block runs in its own
+implicit transaction. This means a multi-statement call is **not** atomic by
+default: if the game crashes between two statements, the first change is
+saved and the second is not, leaving your data in a partially-updated state.
+WAL mode keeps the database file itself uncorrupted, but it cannot protect
+logical consistency across statements that were never grouped into a single
+transaction.
+
+Wrap any group of writes that must succeed or fail together in an explicit
+transaction:
+
+```lua
+-- Without a transaction: two separate commits.
+-- A crash between them leaves items updated but inventory untouched.
+HDB_Execute(db, [[
+    UPDATE items    SET count = count - 1 WHERE id = 42;
+    UPDATE inventory SET gold  = gold  - 100;
+]])
+
+-- With a transaction: one atomic commit.
+-- A crash at any point leaves both tables unchanged.
+HDB_Execute(db, [[
+    BEGIN;
+    UPDATE items    SET count = count - 1 WHERE id = 42;
+    UPDATE inventory SET gold  = gold  - 100;
+    COMMIT;
+]])
+```
+
+Single-statement writes are always atomic and do not need a transaction.
+
 **SQLite configuration.** HearthDB applies the following PRAGMAs automatically
 when a database is opened so you do not need to set them yourself:
 
