@@ -36,14 +36,17 @@ Up to 32 databases may be open simultaneously.
    cargo install xwin
    ```
 
-4. Populate the sysroot (run from the repository root):
+4. Populate the sysroot with the 32-bit (x86) libraries (run from the
+   repository root):
    ```bash
-   xwin --accept-license splat --include-debug-libs --output xwinSDK
+   xwin --accept-license --arch x86 splat --include-debug-libs --output xwinSDK
    ```
    If `xwin` is not in your `PATH`, use the full path:
    ```bash
-   ~/.local/share/cargo/bin/xwin --accept-license splat --include-debug-libs --output xwinSDK
+   ~/.local/share/cargo/bin/xwin --accept-license --arch x86 splat --include-debug-libs --output xwinSDK
    ```
+   Note: the default xwin download is x86_64 only. The `--arch x86` flag
+   is required for this 32-bit target.
 
 5. Ensure `lld-link` is available. It is provided by the `lld` or `llvm`
    package on most distributions:
