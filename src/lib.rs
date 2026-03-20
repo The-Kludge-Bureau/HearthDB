@@ -6,8 +6,6 @@ mod offsets;
 
 use minhook::MinHook;
 use std::sync::OnceLock;
-use windows_sys::Win32::Foundation::{BOOL, TRUE};
-
 const DLL_PROCESS_ATTACH: u32 = 1;
 
 type LoadScriptFunctionsT = unsafe extern "stdcall" fn();
@@ -44,7 +42,7 @@ pub unsafe extern "system" fn DllMain(
     _hinstance: *mut std::ffi::c_void,
     reason: u32,
     _reserved: *mut std::ffi::c_void,
-) -> BOOL {
+) -> i32 {
     if reason == DLL_PROCESS_ATTACH {
         if let Ok(orig) = MinHook::create_hook(
             offsets::PLAYER_LOAD_SCRIPT_FUNCTIONS as *mut _,
@@ -59,7 +57,7 @@ pub unsafe extern "system" fn DllMain(
             let _ = ORIG_GLUE_LOAD.set(std::mem::transmute(orig));
         }
     }
-    TRUE
+    1
 }
 
 #[no_mangle]
