@@ -21,7 +21,8 @@ unsafe fn register_hdb_functions() {
     lua::register_lua_function("HDB_Execute",   db::script_hdb_execute    as *mut usize);
     lua::register_lua_function("HDB_Query",     db::script_hdb_query      as *mut usize);
     lua::register_lua_function("HDB_QueryRaw",  db::script_hdb_query_raw  as *mut usize);
-    lua::register_lua_function("HDB_OpenAddon", db::script_hdb_open_addon as *mut usize);
+    lua::register_lua_function("HDB_OpenAddon",  db::script_hdb_open_addon  as *mut usize);
+    lua::register_lua_function("HDB_GetVersion", db::script_hdb_get_version as *mut usize);
 }
 
 unsafe extern "stdcall" fn player_load_hook() {

@@ -5,6 +5,10 @@ use rusqlite::types::Value;
 use rusqlite::Connection;
 use std::sync::Mutex;
 
+const VERSION_MAJOR: u32 = 0;
+const VERSION_MINOR: u32 = 1;
+const VERSION_PATCH: u32 = 0;
+
 // ---------------------------------------------------------------------------
 // Handle table
 // ---------------------------------------------------------------------------
@@ -408,4 +412,12 @@ pub unsafe extern "fastcall" fn script_hdb_open_addon(_l: LuaState) -> u32 {
             0
         }
     }
+}
+
+pub unsafe extern "fastcall" fn script_hdb_get_version(_l: LuaState) -> u32 {
+    let l = lua::get_lua_state();
+    lua::lua_pushnumber(l, VERSION_MAJOR as f64);
+    lua::lua_pushnumber(l, VERSION_MINOR as f64);
+    lua::lua_pushnumber(l, VERSION_PATCH as f64);
+    3
 }
