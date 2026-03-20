@@ -44,6 +44,21 @@ to close handles will eventually exhaust the 32-slot limit.
 `#` length operator. Use `table.getn(t)` to get the number of rows returned
 by `HDB_Query` and `HDB_QueryRaw`.
 
+**SQLite configuration.** HearthDB applies the following PRAGMAs automatically
+when a database is opened so you do not need to set them yourself:
+
+| PRAGMA | Value | Applied to | Reason |
+|---|---|---|---|
+| `journal_mode` | `WAL` | `HDB_Open` | Write-Ahead Logging keeps the main database file intact on a hard crash. Writes go to a sidecar `.db-wal` file and are checkpointed later, so an abrupt game exit can never corrupt the database. |
+| `synchronous` | `NORMAL` | `HDB_Open` | With WAL mode, `NORMAL` fsyncs at checkpoints rather than after every write. This is crash-safe against application crashes and significantly faster than the default `FULL`. |
+| `foreign_keys` | `ON` | `HDB_Open` | Enforces `REFERENCES` constraints in your schema. Off by default in SQLite for legacy reasons; turning it on means referential integrity errors are caught rather than silently ignored. |
+| `temp_store` | `MEMORY` | both | Sorts and temporary tables are kept in memory instead of written to temp files. Faster queries with no meaningful downside for addon-sized databases. |
+| `busy_timeout` | `5000` | both | If two handles try to write the same database simultaneously, SQLite retries for up to 5 seconds before raising an error, preventing spurious `SQLITE_BUSY` failures. |
+
+The `.db-wal` and `.db-shm` sidecar files that appear alongside WAL-mode
+databases in `CustomData/` are normal. Do not delete them while the game
+is running.
+
 ## Examples
 
 ### Detecting HearthDB

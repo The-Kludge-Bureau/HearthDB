@@ -142,8 +142,14 @@ pub unsafe extern "fastcall" fn script_hdb_open(_l: LuaState) -> u32 {
         }
     };
 
-    if let Err(e) = db.execute_batch("PRAGMA journal_mode=WAL;") {
-        let msg = format!("HDB_Open: could not enable WAL mode: {}", e);
+    if let Err(e) = db.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA synchronous=NORMAL;
+         PRAGMA foreign_keys=ON;
+         PRAGMA temp_store=MEMORY;
+         PRAGMA busy_timeout=5000;",
+    ) {
+        let msg = format!("HDB_Open: could not configure database: {}", e);
         lua::lua_error(l, &msg);
         return 0;
     }
@@ -407,6 +413,15 @@ pub unsafe extern "fastcall" fn script_hdb_open_addon(_l: LuaState) -> u32 {
             return 0;
         }
     };
+
+    if let Err(e) = db.execute_batch(
+        "PRAGMA temp_store=MEMORY;
+         PRAGMA busy_timeout=5000;",
+    ) {
+        let msg = format!("HDB_OpenAddon: could not configure database: {}", e);
+        lua::lua_error(l, &msg);
+        return 0;
+    }
 
     match alloc_handle(db) {
         Some(h) => {
