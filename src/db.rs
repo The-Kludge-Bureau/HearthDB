@@ -1,6 +1,7 @@
 //! HDB_* Lua function implementations and supporting infrastructure.
 
 use crate::lua::{self, LuaState};
+use rusqlite::types::Value;
 use rusqlite::Connection;
 use std::sync::Mutex;
 
@@ -65,6 +66,19 @@ fn ensure_custom_data_dir() -> bool {
 /// that could introduce a path separator or traversal component.
 fn resolve_db_path(filename: &str) -> String {
     format!("CustomData\\{}", filename)
+}
+
+/// Converts a rusqlite Value to an Option<String>.
+/// NULL becomes None; all other types are coerced to their string
+/// representation so Lua always receives a string or nil.
+fn value_to_string(v: Value) -> Option<String> {
+    match v {
+        Value::Null        => None,
+        Value::Integer(n)  => Some(n.to_string()),
+        Value::Real(f)     => Some(f.to_string()),
+        Value::Text(s)     => Some(s),
+        Value::Blob(_)     => Some("<blob>".to_string()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -204,7 +218,7 @@ pub unsafe extern "fastcall" fn script_hdb_query(_l: LuaState) -> u32 {
             while let Some(row) = query.next()? {
                 let mut r = Vec::with_capacity(col_count);
                 for (i, name) in col_names.iter().enumerate() {
-                    let val: Option<String> = row.get(i).ok();
+                    let val = value_to_string(row.get::<_, Value>(i).unwrap_or(Value::Null));
                     r.push((name.clone(), val));
                 }
                 rows.push(r);
@@ -272,7 +286,7 @@ pub unsafe extern "fastcall" fn script_hdb_query_raw(_l: LuaState) -> u32 {
             while let Some(row) = query.next()? {
                 let mut r = Vec::with_capacity(col_count);
                 for i in 0..col_count {
-                    r.push(row.get(i).ok());
+                    r.push(value_to_string(row.get::<_, Value>(i).unwrap_or(Value::Null)));
                 }
                 rows.push(r);
             }
