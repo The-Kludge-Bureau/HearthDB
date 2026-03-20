@@ -14,6 +14,7 @@ the TurtleWoW plugin loader on startup.
 | `HDB_Execute` | `HDB_Execute(handle, sql)` | Executes a SQL statement that produces no rows (INSERT, UPDATE, CREATE, DELETE, etc.). Raises a Lua error on failure. |
 | `HDB_Query` | `HDB_Query(handle, sql) -> table` | Executes a query and returns an array of row tables keyed by column name: `{{col=val, ...}, ...}`. |
 | `HDB_QueryRaw` | `HDB_QueryRaw(handle, sql) -> cols, rows` | Executes a query and returns two values: a column-name array `{"col1", "col2", ...}` and a positional row array `{{v1, v2, ...}, ...}`. |
+| `HDB_OpenAddon` | `HDB_OpenAddon(addon_name, path) -> handle` | Opens `Interface/AddOns/<addon_name>/<path>` read-only. `path` may be a plain filename or a `/`- or `\`-delimited relative path within the addon directory. Returns a handle compatible with `HDB_Query`, `HDB_QueryRaw`, and `HDB_Close`. Raises a Lua error on failure. |
 
 Up to 32 databases may be open simultaneously.
 

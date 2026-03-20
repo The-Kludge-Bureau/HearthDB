@@ -16,11 +16,12 @@ static ORIG_PLAYER_LOAD: OnceLock<LoadScriptFunctionsT> = OnceLock::new();
 static ORIG_GLUE_LOAD:   OnceLock<LoadScriptFunctionsT> = OnceLock::new();
 
 unsafe fn register_hdb_functions() {
-    lua::register_lua_function("HDB_Open",     db::script_hdb_open      as *mut usize);
-    lua::register_lua_function("HDB_Close",    db::script_hdb_close     as *mut usize);
-    lua::register_lua_function("HDB_Execute",  db::script_hdb_execute   as *mut usize);
-    lua::register_lua_function("HDB_Query",    db::script_hdb_query     as *mut usize);
-    lua::register_lua_function("HDB_QueryRaw", db::script_hdb_query_raw as *mut usize);
+    lua::register_lua_function("HDB_Open",      db::script_hdb_open       as *mut usize);
+    lua::register_lua_function("HDB_Close",     db::script_hdb_close      as *mut usize);
+    lua::register_lua_function("HDB_Execute",   db::script_hdb_execute    as *mut usize);
+    lua::register_lua_function("HDB_Query",     db::script_hdb_query      as *mut usize);
+    lua::register_lua_function("HDB_QueryRaw",  db::script_hdb_query_raw  as *mut usize);
+    lua::register_lua_function("HDB_OpenAddon", db::script_hdb_open_addon as *mut usize);
 }
 
 unsafe extern "stdcall" fn player_load_hook() {
