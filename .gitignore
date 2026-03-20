@@ -1,3 +1,4 @@
 xwinSDK/
+.xwin-cache/
 target/
 *.pdb
