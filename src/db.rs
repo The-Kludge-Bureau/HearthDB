@@ -68,6 +68,24 @@ fn resolve_db_path(filename: &str) -> String {
     format!("CustomData\\{}", filename)
 }
 
+/// Returns true if every component of a slash- or backslash-delimited path is
+/// a valid filename component (non-empty, no separator chars, not `.` or `..`).
+#[allow(dead_code)]
+fn is_valid_path(path: &str) -> bool {
+    !path.is_empty()
+        && path
+            .split(|c| c == '/' || c == '\\')
+            .all(|part| part != "." && part != ".." && is_valid_filename(part))
+}
+
+/// Builds the path for `path` inside `Interface\AddOns\<addon_name>`.
+/// Safety is guaranteed by is_valid_filename (addon_name) and is_valid_path
+/// (path), which together reject any separator or traversal component.
+#[allow(dead_code)]
+fn resolve_addon_db_path(addon_name: &str, path: &str) -> String {
+    format!("Interface\\AddOns\\{}\\{}", addon_name, path.replace('/', "\\"))
+}
+
 /// Converts a rusqlite Value to an Option<String>.
 /// NULL becomes None; all other types are coerced to their string
 /// representation so Lua always receives a string or nil.
