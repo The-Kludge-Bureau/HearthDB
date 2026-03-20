@@ -4,11 +4,11 @@ mod db;
 mod lua;
 mod offsets;
 
-use lua::LuaState;
 use minhook::MinHook;
 use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::{BOOL, TRUE};
-use windows_sys::Win32::System::LibraryLoader::DLL_PROCESS_ATTACH;
+
+const DLL_PROCESS_ATTACH: u32 = 1;
 
 type LoadScriptFunctionsT = unsafe extern "stdcall" fn();
 

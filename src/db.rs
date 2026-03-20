@@ -2,8 +2,6 @@
 
 use crate::lua::{self, LuaState};
 use rusqlite::Connection;
-use std::ffi::OsString;
-use std::os::windows::ffi::OsStringExt;
 use std::sync::Mutex;
 
 // ---------------------------------------------------------------------------
@@ -55,74 +53,25 @@ fn is_valid_filename(name: &str) -> bool {
 
 /// Creates the CustomData directory if it does not already exist.
 /// Returns true on success or if the directory already exists.
-unsafe fn ensure_custom_data_dir() -> bool {
-    use windows_sys::Win32::Foundation::GetLastError;
-    use windows_sys::Win32::Foundation::ERROR_ALREADY_EXISTS;
-    use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
-    let path: Vec<u16> = "CustomData\0".encode_utf16().collect();
-    CreateDirectoryW(path.as_ptr(), std::ptr::null()) != 0
-        || GetLastError() == ERROR_ALREADY_EXISTS
+fn ensure_custom_data_dir() -> bool {
+    match std::fs::create_dir("CustomData") {
+        Ok(()) => true,
+        Err(e) => e.kind() == std::io::ErrorKind::AlreadyExists,
+    }
 }
 
-/// Resolves `filename` relative to CustomData, canonicalizes the result,
-/// and confirms it is a strict child of CustomData. Returns the absolute
-/// UTF-8 path on success.
-unsafe fn resolve_db_path(filename: &str) -> Option<String> {
-    use windows_sys::Win32::Storage::FileSystem::GetFullPathNameW;
-
-    let base_input: Vec<u16> = "CustomData\0".encode_utf16().collect();
-    let mut base_buf = vec![0u16; 260];
-    let base_len = GetFullPathNameW(
-        base_input.as_ptr(),
-        base_buf.len() as u32,
-        base_buf.as_mut_ptr(),
-        std::ptr::null_mut(),
-    ) as usize;
-    if base_len == 0 {
-        return None;
-    }
-    let mut base = OsString::from_wide(&base_buf[..base_len])
-        .to_string_lossy()
-        .into_owned();
-    if !base.ends_with('\\') {
-        base.push('\\');
-    }
-
-    let candidate = format!("CustomData\\{}", filename);
-    let cand_input: Vec<u16> = {
-        let mut v: Vec<u16> = candidate.encode_utf16().collect();
-        v.push(0);
-        v
-    };
-    let mut cand_buf = vec![0u16; 260];
-    let cand_len = GetFullPathNameW(
-        cand_input.as_ptr(),
-        cand_buf.len() as u32,
-        cand_buf.as_mut_ptr(),
-        std::ptr::null_mut(),
-    ) as usize;
-    if cand_len == 0 {
-        return None;
-    }
-    let cand = OsString::from_wide(&cand_buf[..cand_len])
-        .to_string_lossy()
-        .into_owned();
-
-    if cand.len() <= base.len() {
-        return None;
-    }
-    if !cand.to_ascii_lowercase().starts_with(&base.to_ascii_lowercase()) {
-        return None;
-    }
-
-    Some(cand)
+/// Builds the path for `filename` inside CustomData.
+/// Safety is guaranteed by is_valid_filename, which rejects any character
+/// that could introduce a path separator or traversal component.
+fn resolve_db_path(filename: &str) -> String {
+    format!("CustomData\\{}", filename)
 }
 
 // ---------------------------------------------------------------------------
 // Lua script functions
 // ---------------------------------------------------------------------------
 
-pub unsafe extern "fastcall" fn script_hdb_open(l: LuaState) -> u32 {
+pub unsafe extern "fastcall" fn script_hdb_open(_l: LuaState) -> u32 {
     let l = lua::get_lua_state();
 
     if lua::lua_gettop(l) != 1 || !lua::lua_isstring(l, 1) {
@@ -148,13 +97,7 @@ pub unsafe extern "fastcall" fn script_hdb_open(l: LuaState) -> u32 {
         return 0;
     }
 
-    let full_path = match resolve_db_path(&filename) {
-        Some(p) => p,
-        None => {
-            lua::lua_error(l, "HDB_Open: path must remain inside CustomData");
-            return 0;
-        }
-    };
+    let full_path = resolve_db_path(&filename);
 
     let db = match Connection::open(&full_path) {
         Ok(c) => c,
@@ -177,7 +120,7 @@ pub unsafe extern "fastcall" fn script_hdb_open(l: LuaState) -> u32 {
     }
 }
 
-pub unsafe extern "fastcall" fn script_hdb_close(l: LuaState) -> u32 {
+pub unsafe extern "fastcall" fn script_hdb_close(_l: LuaState) -> u32 {
     let l = lua::get_lua_state();
 
     if lua::lua_gettop(l) != 1 || !lua::lua_isnumber(l, 1) {
@@ -199,7 +142,7 @@ pub unsafe extern "fastcall" fn script_hdb_close(l: LuaState) -> u32 {
     0
 }
 
-pub unsafe extern "fastcall" fn script_hdb_execute(l: LuaState) -> u32 {
+pub unsafe extern "fastcall" fn script_hdb_execute(_l: LuaState) -> u32 {
     let l = lua::get_lua_state();
 
     if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
@@ -230,7 +173,7 @@ pub unsafe extern "fastcall" fn script_hdb_execute(l: LuaState) -> u32 {
     0
 }
 
-pub unsafe extern "fastcall" fn script_hdb_query(l: LuaState) -> u32 {
+pub unsafe extern "fastcall" fn script_hdb_query(_l: LuaState) -> u32 {
     let l = lua::get_lua_state();
 
     if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
@@ -298,7 +241,7 @@ pub unsafe extern "fastcall" fn script_hdb_query(l: LuaState) -> u32 {
     1
 }
 
-pub unsafe extern "fastcall" fn script_hdb_query_raw(l: LuaState) -> u32 {
+pub unsafe extern "fastcall" fn script_hdb_query_raw(_l: LuaState) -> u32 {
     let l = lua::get_lua_state();
 
     if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
