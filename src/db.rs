@@ -297,3 +297,75 @@ pub unsafe extern "fastcall" fn script_hdb_query(l: LuaState) -> u32 {
     }
     1
 }
+
+pub unsafe extern "fastcall" fn script_hdb_query_raw(l: LuaState) -> u32 {
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
+        lua::lua_error(l, "Usage: HDB_QueryRaw(handle, sql)");
+        return 0;
+    }
+
+    let h = lua::lua_tonumber(l, 1) as usize;
+    let sql = match lua::lua_tostring(l, 2) {
+        Some(s) => s,
+        None => {
+            lua::lua_error(l, "HDB_QueryRaw: sql is nil");
+            return 0;
+        }
+    };
+
+    let result: Option<Result<(Vec<String>, Vec<Vec<Option<String>>>), rusqlite::Error>> =
+        with_handle(h, |db| {
+            let mut stmt = db.prepare(&sql)?;
+            let col_names: Vec<String> = stmt
+                .column_names()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let col_count = col_names.len();
+            let mut rows: Vec<Vec<Option<String>>> = Vec::new();
+            let mut query = stmt.query([])?;
+            while let Some(row) = query.next()? {
+                let mut r = Vec::with_capacity(col_count);
+                for i in 0..col_count {
+                    r.push(row.get(i).ok());
+                }
+                rows.push(r);
+            }
+            Ok((col_names, rows))
+        });
+
+    match result {
+        None => {
+            lua::lua_error(l, "HDB_QueryRaw: invalid handle");
+            return 0;
+        }
+        Some(Err(e)) => {
+            let msg = format!("HDB_QueryRaw: {}", e);
+            lua::lua_error(l, &msg);
+            return 0;
+        }
+        Some(Ok((col_names, rows))) => {
+            lua::lua_newtable(l); // cols array
+            for (i, name) in col_names.iter().enumerate() {
+                lua::lua_pushstring(l, name);
+                lua::lua_rawseti(l, -2, (i + 1) as i32);
+            }
+
+            lua::lua_newtable(l); // rows array
+            for (row_idx, row) in rows.iter().enumerate() {
+                lua::lua_newtable(l); // positional row
+                for (col_idx, val) in row.iter().enumerate() {
+                    match val {
+                        Some(s) => lua::lua_pushstring(l, s),
+                        None    => lua::lua_pushnil(l),
+                    }
+                    lua::lua_rawseti(l, -2, (col_idx + 1) as i32);
+                }
+                lua::lua_rawseti(l, -2, (row_idx + 1) as i32);
+            }
+        }
+    }
+    2
+}
