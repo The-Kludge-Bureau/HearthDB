@@ -70,7 +70,6 @@ fn resolve_db_path(filename: &str) -> String {
 
 /// Returns true if every component of a slash- or backslash-delimited path is
 /// a valid filename component (non-empty, no separator chars, not `.` or `..`).
-#[allow(dead_code)]
 fn is_valid_path(path: &str) -> bool {
     !path.is_empty()
         && path
@@ -81,7 +80,6 @@ fn is_valid_path(path: &str) -> bool {
 /// Builds the path for `path` inside `Interface\AddOns\<addon_name>`.
 /// Safety is guaranteed by is_valid_filename (addon_name) and is_valid_path
 /// (path), which together reject any separator or traversal component.
-#[allow(dead_code)]
 fn resolve_addon_db_path(addon_name: &str, path: &str) -> String {
     format!("Interface\\AddOns\\{}\\{}", addon_name, path.replace('/', "\\"))
 }
@@ -343,4 +341,72 @@ pub unsafe extern "fastcall" fn script_hdb_query_raw(_l: LuaState) -> u32 {
         }
     }
     2
+}
+
+#[allow(dead_code)]
+pub unsafe extern "fastcall" fn script_hdb_open_addon(_l: LuaState) -> u32 {
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 2 || !lua::lua_isstring(l, 1) || !lua::lua_isstring(l, 2) {
+        lua::lua_error(l, "Usage: HDB_OpenAddon(addon_name, path)");
+        return 0;
+    }
+
+    let addon_name = match lua::lua_tostring(l, 1) {
+        Some(s) => s,
+        None => {
+            lua::lua_error(l, "HDB_OpenAddon: addon_name is nil");
+            return 0;
+        }
+    };
+
+    let path = match lua::lua_tostring(l, 2) {
+        Some(s) => s,
+        None => {
+            lua::lua_error(l, "HDB_OpenAddon: path is nil");
+            return 0;
+        }
+    };
+
+    if !is_valid_filename(&addon_name) {
+        lua::lua_error(
+            l,
+            "HDB_OpenAddon: invalid addon_name (must not contain < > : \" / \\ | ? *)",
+        );
+        return 0;
+    }
+
+    if !is_valid_path(&path) {
+        lua::lua_error(
+            l,
+            "HDB_OpenAddon: invalid path (components must not be empty, ., or .., \
+             or contain < > : \" / \\ | ? *)",
+        );
+        return 0;
+    }
+
+    let full_path = resolve_addon_db_path(&addon_name, &path);
+
+    let db = match Connection::open_with_flags(
+        &full_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = format!("HDB_OpenAddon: {}", e);
+            lua::lua_error(l, &msg);
+            return 0;
+        }
+    };
+
+    match alloc_handle(db) {
+        Some(h) => {
+            lua::lua_pushnumber(l, h as f64);
+            1
+        }
+        None => {
+            lua::lua_error(l, "HDB_OpenAddon: too many open databases (max 32)");
+            0
+        }
+    }
 }
