@@ -6,7 +6,7 @@ use rusqlite::Connection;
 use std::sync::Mutex;
 
 const VERSION_MAJOR: u32 = 0;
-const VERSION_MINOR: u32 = 1;
+const VERSION_MINOR: u32 = 2;
 const VERSION_PATCH: u32 = 0;
 
 // ---------------------------------------------------------------------------
