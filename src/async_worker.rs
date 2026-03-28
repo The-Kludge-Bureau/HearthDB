@@ -166,3 +166,54 @@ fn ensure_worker() -> &'static mpsc::Sender<WorkItem> {
         tx
     })
 }
+
+// ---------------------------------------------------------------------------
+// Public API (called from db.rs script functions)
+// ---------------------------------------------------------------------------
+
+/// Submit an async operation. Returns the ticket number.
+/// Returns Err if the handle is poisoned (caller should raise a Lua error).
+pub fn submit(handle_id: usize, conn: Handle, operation: AsyncOp) -> Result<u64, String> {
+    {
+        let poisoned = POISONED.lock().unwrap();
+        if poisoned.contains(&handle_id) {
+            return Err(format!(
+                "handle {} has a pending failure -- call HDB_GetResult to retrieve it",
+                handle_id
+            ));
+        }
+    }
+
+    let ticket = NEXT_TICKET.fetch_add(1, Ordering::Relaxed);
+    let item = WorkItem {
+        ticket,
+        handle_id,
+        conn,
+        operation,
+    };
+    ensure_worker().send(item).expect("worker thread died");
+    Ok(ticket)
+}
+
+/// Retrieve a completed result. Returns None if still pending.
+/// One-shot: the result is removed from the map on retrieval.
+pub fn get_result(ticket: u64) -> Option<AsyncResult> {
+    RESULTS.lock().unwrap().remove(&ticket)
+}
+
+/// Clear poison for a specific handle (called after addon retrieves the failure).
+pub fn clear_poison(handle_id: usize) {
+    POISONED.lock().unwrap().remove(&handle_id);
+}
+
+/// Check if a handle is currently poisoned.
+pub fn is_poisoned(handle_id: usize) -> bool {
+    POISONED.lock().unwrap().contains(&handle_id)
+}
+
+/// Cancel all pending results for a handle (called by HDB_Close).
+/// Inserts the handle into the poison set so the worker skips any
+/// remaining queued work for this handle.
+pub fn cancel_handle(handle_id: usize) {
+    POISONED.lock().unwrap().insert(handle_id);
+}
