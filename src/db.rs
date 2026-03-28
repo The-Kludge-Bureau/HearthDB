@@ -3,7 +3,7 @@
 use crate::lua::{self, LuaState};
 use rusqlite::types::Value;
 use rusqlite::Connection;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 const VERSION_MAJOR: u32 = 0;
 const VERSION_MINOR: u32 = 2;
@@ -15,28 +15,45 @@ const VERSION_PATCH: u32 = 0;
 
 const MAX_DBS: usize = 32;
 
-static HANDLES: Mutex<[Option<Connection>; MAX_DBS]> = {
-    const NONE: Option<Connection> = None;
+/// Wrapper to allow sending rusqlite::Connection to the worker thread.
+/// Safety: bundled SQLite compiles in serialized mode, so Connection is safe
+/// to use from any thread as long as access is externally synchronized.
+pub struct SendConnection(pub Connection);
+unsafe impl Send for SendConnection {}
+
+type Handle = Arc<Mutex<SendConnection>>;
+
+static HANDLES: Mutex<[Option<Handle>; MAX_DBS]> = {
+    const NONE: Option<Handle> = None;
     Mutex::new([NONE; MAX_DBS])
 };
 
 fn alloc_handle(db: Connection) -> Option<usize> {
+    let handle = Arc::new(Mutex::new(SendConnection(db)));
     let mut handles = HANDLES.lock().unwrap();
     for (i, slot) in handles.iter_mut().enumerate() {
         if slot.is_none() {
-            *slot = Some(db);
+            *slot = Some(handle);
             return Some(i + 1); // 1-based
         }
     }
     None
 }
 
+/// Clone the Arc for the given handle so callers can use the connection
+/// without holding the global handle-table lock.
+pub fn clone_handle(h: usize) -> Option<Handle> {
+    let handles = HANDLES.lock().unwrap();
+    handles.get(h.wrapping_sub(1))?.as_ref().map(Arc::clone)
+}
+
 fn with_handle<F, R>(h: usize, f: F) -> Option<R>
 where
     F: FnOnce(&Connection) -> R,
 {
-    let handles = HANDLES.lock().unwrap();
-    handles.get(h.wrapping_sub(1))?.as_ref().map(f)
+    let conn = clone_handle(h)?;
+    let guard = conn.lock().unwrap();
+    Some(f(&guard.0))
 }
 
 fn free_handle(h: usize) {
