@@ -21,7 +21,7 @@ const MAX_DBS: usize = 32;
 pub struct SendConnection(pub Connection);
 unsafe impl Send for SendConnection {}
 
-type Handle = Arc<Mutex<SendConnection>>;
+pub type Handle = Arc<Mutex<SendConnection>>;
 
 static HANDLES: Mutex<[Option<Handle>; MAX_DBS]> = {
     const NONE: Option<Handle> = None;

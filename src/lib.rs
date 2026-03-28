@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+mod async_worker;
 mod db;
 mod lua;
 mod offsets;
