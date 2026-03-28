@@ -459,3 +459,192 @@ pub unsafe extern "fastcall" fn script_hdb_get_version(_l: LuaState) -> u32 {
     lua::lua_pushnumber(l, VERSION_PATCH as f64);
     3
 }
+
+// ---------------------------------------------------------------------------
+// Async Lua script functions
+// ---------------------------------------------------------------------------
+
+pub unsafe extern "fastcall" fn script_hdb_execute_async(_l: LuaState) -> u32 {
+    use crate::async_worker;
+
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
+        lua::lua_error(l, "Usage: HDB_ExecuteAsync(handle, sql)");
+        return 0;
+    }
+
+    let h = lua::lua_tonumber(l, 1) as usize;
+    let sql = match lua::lua_tostring(l, 2) {
+        Some(s) => s,
+        None => {
+            lua::lua_error(l, "HDB_ExecuteAsync: sql is nil");
+            return 0;
+        }
+    };
+
+    let conn = match clone_handle(h) {
+        Some(c) => c,
+        None => {
+            lua::lua_error(l, "HDB_ExecuteAsync: invalid handle");
+            return 0;
+        }
+    };
+
+    match async_worker::submit(h, conn, async_worker::AsyncOp::Execute(sql)) {
+        Ok(ticket) => {
+            lua::lua_pushnumber(l, ticket as f64);
+            1
+        }
+        Err(msg) => {
+            lua::lua_error(l, &format!("HDB_ExecuteAsync: {}", msg));
+            0
+        }
+    }
+}
+
+pub unsafe extern "fastcall" fn script_hdb_query_async(_l: LuaState) -> u32 {
+    use crate::async_worker;
+
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
+        lua::lua_error(l, "Usage: HDB_QueryAsync(handle, sql)");
+        return 0;
+    }
+
+    let h = lua::lua_tonumber(l, 1) as usize;
+    let sql = match lua::lua_tostring(l, 2) {
+        Some(s) => s,
+        None => {
+            lua::lua_error(l, "HDB_QueryAsync: sql is nil");
+            return 0;
+        }
+    };
+
+    let conn = match clone_handle(h) {
+        Some(c) => c,
+        None => {
+            lua::lua_error(l, "HDB_QueryAsync: invalid handle");
+            return 0;
+        }
+    };
+
+    match async_worker::submit(h, conn, async_worker::AsyncOp::Query(sql)) {
+        Ok(ticket) => {
+            lua::lua_pushnumber(l, ticket as f64);
+            1
+        }
+        Err(msg) => {
+            lua::lua_error(l, &format!("HDB_QueryAsync: {}", msg));
+            0
+        }
+    }
+}
+
+pub unsafe extern "fastcall" fn script_hdb_query_raw_async(_l: LuaState) -> u32 {
+    use crate::async_worker;
+
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
+        lua::lua_error(l, "Usage: HDB_QueryRawAsync(handle, sql)");
+        return 0;
+    }
+
+    let h = lua::lua_tonumber(l, 1) as usize;
+    let sql = match lua::lua_tostring(l, 2) {
+        Some(s) => s,
+        None => {
+            lua::lua_error(l, "HDB_QueryRawAsync: sql is nil");
+            return 0;
+        }
+    };
+
+    let conn = match clone_handle(h) {
+        Some(c) => c,
+        None => {
+            lua::lua_error(l, "HDB_QueryRawAsync: invalid handle");
+            return 0;
+        }
+    };
+
+    match async_worker::submit(h, conn, async_worker::AsyncOp::QueryRaw(sql)) {
+        Ok(ticket) => {
+            lua::lua_pushnumber(l, ticket as f64);
+            1
+        }
+        Err(msg) => {
+            lua::lua_error(l, &format!("HDB_QueryRawAsync: {}", msg));
+            0
+        }
+    }
+}
+
+pub unsafe extern "fastcall" fn script_hdb_get_result(_l: LuaState) -> u32 {
+    use crate::async_worker::{self, AsyncResult};
+
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 1 || !lua::lua_isnumber(l, 1) {
+        lua::lua_error(l, "Usage: HDB_GetResult(ticket)");
+        return 0;
+    }
+
+    let ticket = lua::lua_tonumber(l, 1) as u64;
+
+    match async_worker::get_result(ticket) {
+        None => {
+            // Still pending: return nil (1 value)
+            lua::lua_pushnil(l);
+            1
+        }
+        Some(AsyncResult::Execute { rows_affected }) => {
+            lua::lua_pushnumber(l, rows_affected as f64);
+            1
+        }
+        Some(AsyncResult::Query { rows }) => {
+            lua::lua_newtable(l);
+            for (row_idx, row) in rows.iter().enumerate() {
+                lua::lua_newtable(l);
+                for (col_name, val) in row {
+                    lua::lua_pushstring(l, col_name);
+                    match val {
+                        Some(s) => lua::lua_pushstring(l, s),
+                        None    => lua::lua_pushnil(l),
+                    }
+                    lua::lua_settable(l, -3);
+                }
+                lua::lua_rawseti(l, -2, (row_idx + 1) as i32);
+            }
+            1
+        }
+        Some(AsyncResult::QueryRaw { cols, rows }) => {
+            lua::lua_newtable(l);
+            for (i, name) in cols.iter().enumerate() {
+                lua::lua_pushstring(l, name);
+                lua::lua_rawseti(l, -2, (i + 1) as i32);
+            }
+
+            lua::lua_newtable(l);
+            for (row_idx, row) in rows.iter().enumerate() {
+                lua::lua_newtable(l);
+                for (col_idx, val) in row.iter().enumerate() {
+                    match val {
+                        Some(s) => lua::lua_pushstring(l, s),
+                        None    => lua::lua_pushnil(l),
+                    }
+                    lua::lua_rawseti(l, -2, (col_idx + 1) as i32);
+                }
+                lua::lua_rawseti(l, -2, (row_idx + 1) as i32);
+            }
+            2
+        }
+        Some(AsyncResult::Error { message }) => {
+            // Error: return nil, error_message (2 values)
+            lua::lua_pushnil(l);
+            lua::lua_pushstring(l, &message);
+            2
+        }
+    }
+}
