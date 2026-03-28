@@ -201,6 +201,8 @@ pub unsafe extern "fastcall" fn script_hdb_close(_l: LuaState) -> u32 {
         return 0;
     }
 
+    // Poison the handle so the worker skips any remaining queued work
+    crate::async_worker::cancel_handle(h);
     free_handle(h);
     0
 }
