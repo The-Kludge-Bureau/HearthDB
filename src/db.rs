@@ -66,6 +66,13 @@ fn free_handle(h: usize) {
     }
 }
 
+/// Returns true if the f64 value represents a positive integer that fits
+/// in the handle range. Rejects NaN, infinity, negatives, zero, and
+/// fractional values.
+fn is_valid_handle_number(n: f64) -> bool {
+    n > 0.0 && n <= MAX_DBS as f64 && n == n.floor()
+}
+
 /// Close all open handles and reset async state.
 /// Called on UI reload so stale handles from the previous Lua session
 /// do not permanently occupy slots.
@@ -210,7 +217,12 @@ pub unsafe extern "fastcall" fn script_hdb_close(_l: LuaState) -> u32 {
         return 0;
     }
 
-    let h = lua::lua_tonumber(l, 1) as usize;
+    let raw = lua::lua_tonumber(l, 1);
+    if !is_valid_handle_number(raw) {
+        lua::lua_error(l, "HDB_Close: invalid or already-closed handle");
+        return 0;
+    }
+    let h = raw as usize;
     let valid = {
         let handles = HANDLES.lock().unwrap();
         handles.get(h.wrapping_sub(1)).map_or(false, |s| s.is_some())
