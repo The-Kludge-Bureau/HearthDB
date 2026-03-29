@@ -27,6 +27,7 @@ unsafe fn register_hdb_functions() {
     lua::register_lua_function("HDB_QueryAsync",     db::script_hdb_query_async     as *mut usize);
     lua::register_lua_function("HDB_QueryRawAsync",  db::script_hdb_query_raw_async as *mut usize);
     lua::register_lua_function("HDB_GetResult",      db::script_hdb_get_result      as *mut usize);
+    lua::register_lua_function("HDB_ClearPoison",   db::script_hdb_clear_poison    as *mut usize);
 }
 
 unsafe extern "stdcall" fn player_load_hook() {

@@ -681,3 +681,28 @@ pub unsafe extern "fastcall" fn script_hdb_get_result(_l: LuaState) -> u32 {
         }
     }
 }
+
+pub unsafe extern "fastcall" fn script_hdb_clear_poison(_l: LuaState) -> u32 {
+    use crate::async_worker;
+
+    let l = lua::get_lua_state();
+
+    if lua::lua_gettop(l) != 1 || !lua::lua_isnumber(l, 1) {
+        lua::lua_error(l, "Usage: HDB_ClearPoison(handle)");
+        return 0;
+    }
+
+    let h = lua::lua_tonumber(l, 1) as usize;
+
+    let valid = {
+        let handles = HANDLES.lock().unwrap();
+        handles.get(h.wrapping_sub(1)).map_or(false, |s| s.is_some())
+    };
+    if !valid {
+        lua::lua_error(l, "HDB_ClearPoison: invalid handle");
+        return 0;
+    }
+
+    async_worker::clear_poison(h);
+    0
+}
