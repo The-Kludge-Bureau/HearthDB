@@ -34,7 +34,10 @@ fn alloc_handle(db: Connection) -> Option<usize> {
     for (i, slot) in handles.iter_mut().enumerate() {
         if slot.is_none() {
             *slot = Some(handle);
-            return Some(i + 1); // 1-based
+            let h = i + 1; // 1-based
+            // Clear stale poison from a previous occupant of this slot
+            crate::async_worker::clear_poison(h);
+            return Some(h);
         }
     }
     None
