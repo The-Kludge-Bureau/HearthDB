@@ -1,8 +1,9 @@
 # HearthDB
 
 A TurtleWoW DLL plugin that gives addon and mod authors access to SQLite
-databases from Lua. It exposes a small set of `HDB_*` globals for opening,
-querying, and closing databases, and follows the same loader convention as
+databases from Lua. It exposes a set of `HDB_*` globals for opening,
+querying, and closing databases, with both synchronous and asynchronous
+variants. It follows the same loader convention as
 [nampower](https://gitea.com/avitasia/nampower): the DLL exports a `Load()`
 function called by the TurtleWoW plugin loader on startup.
 
@@ -18,17 +19,31 @@ Up to 32 database handles may be open at the same time.
 
 ## Lua API
 
-### Functions
+### Synchronous functions
 
 | Function | Signature | Description |
 |---|---|---|
 | `HDB_Open` | `HDB_Open(filename) -> handle` | Opens or creates `CustomData/<filename>`. Returns an integer handle on success, raises a Lua error on failure. |
-| `HDB_Close` | `HDB_Close(handle)` | Closes the database and frees the handle slot. Always close handles you no longer need. |
+| `HDB_OpenAddon` | `HDB_OpenAddon(addon_name, path) -> handle` | Opens `Interface/AddOns/<addon_name>/<path>` **read-only**. `path` may be a plain filename (`data.db`) or a relative path (`subdir/data.db`). The handle is compatible with all query and close functions. `HDB_Execute` on a read-only handle raises a Lua error. |
+| `HDB_Close` | `HDB_Close(handle)` | Closes the database, cancels any pending async work for the handle, and frees the handle slot. Always close handles you no longer need. |
 | `HDB_Execute` | `HDB_Execute(handle, sql)` | Executes one or more SQL statements that produce no rows (INSERT, UPDATE, DELETE, CREATE TABLE, etc.). Multiple statements may be separated by semicolons. Raises a Lua error on failure. |
 | `HDB_Query` | `HDB_Query(handle, sql) -> rows` | Executes a SELECT and returns an array of row tables keyed by column name: `{ {col=val, ...}, ... }`. |
 | `HDB_QueryRaw` | `HDB_QueryRaw(handle, sql) -> cols, rows` | Executes a SELECT and returns two values: a column-name array `{"col1", "col2", ...}` and a positional row array `{ {v1, v2, ...}, ... }`. Slightly more efficient than `HDB_Query` for large result sets. |
-| `HDB_OpenAddon` | `HDB_OpenAddon(addon_name, path) -> handle` | Opens `Interface/AddOns/<addon_name>/<path>` **read-only**. `path` may be a plain filename (`data.db`) or a relative path (`subdir/data.db`). The handle is compatible with `HDB_Query`, `HDB_QueryRaw`, and `HDB_Close`. `HDB_Execute` on a read-only handle raises a Lua error. |
 | `HDB_GetVersion` | `HDB_GetVersion() -> major, minor, patch` | Returns the HearthDB version as three integers. |
+
+### Asynchronous functions
+
+These functions offload SQL execution to a background worker thread, allowing
+the game to continue rendering while the database works. Submit an operation,
+receive a ticket number, and poll for the result across frames.
+
+| Function | Signature | Description |
+|---|---|---|
+| `HDB_ExecuteAsync` | `HDB_ExecuteAsync(handle, sql) -> ticket` | Submits one or more non-SELECT statements for background execution. Returns a ticket number. Raises a Lua error if the handle is invalid or poisoned. |
+| `HDB_QueryAsync` | `HDB_QueryAsync(handle, sql) -> ticket` | Submits a SELECT for background execution. The result, once ready, has the same structure as `HDB_Query`. |
+| `HDB_QueryRawAsync` | `HDB_QueryRawAsync(handle, sql) -> ticket` | Submits a SELECT for background execution. The result, once ready, has the same two-value structure as `HDB_QueryRaw`. |
+| `HDB_GetResult` | `HDB_GetResult(ticket) -> ...` | Polls for a completed async result. Returns `nil` if still pending. For execute results, returns `rows_affected`. For query results, returns the same structure as the sync equivalent. For errors, returns `nil, error_message`. Results are one-shot: a second call with the same ticket returns `nil`. |
+| `HDB_ClearPoison` | `HDB_ClearPoison(handle)` | Clears the poison state on a handle after an async error has been retrieved. Without this, the handle cannot be used for further async operations. |
 
 ### Notes
 
@@ -38,11 +53,27 @@ Blob columns return the literal string `"<blob>"`.
 
 **Handle lifecycle.** Every successful `HDB_Open` / `HDB_OpenAddon` call
 allocates a handle slot. You must call `HDB_Close` when you are done. Failing
-to close handles will eventually exhaust the 32-slot limit.
+to close handles will eventually exhaust the 32-slot limit. On a UI reload,
+all open handles are automatically closed and async state is reset, so addons
+do not need to worry about stale handles leaking across `/reload`.
 
 **Lua 5.0 compatibility.** WoW 1.12.1 uses Lua 5.0, which does not have the
 `#` length operator. Use `table.getn(t)` to get the number of rows returned
 by `HDB_Query` and `HDB_QueryRaw`.
+
+**Async workflow.** Call one of the `*Async` functions to submit work. Each
+returns a ticket number immediately. On subsequent frames, call
+`HDB_GetResult(ticket)` until it returns a non-nil value. Results are
+one-shot: once retrieved, the ticket is consumed. You may have multiple
+tickets in flight at the same time; they are processed in submission order by
+a single background worker thread.
+
+**Poison.** If an async operation fails (bad SQL, read-only violation, etc.),
+the handle enters a *poisoned* state. While poisoned, all subsequent async
+submissions on that handle are rejected and any already-queued work for it is
+cancelled. To recover, retrieve the error result with `HDB_GetResult`, then
+call `HDB_ClearPoison(handle)`. Synchronous functions (`HDB_Execute`,
+`HDB_Query`, `HDB_QueryRaw`) are not affected by poison.
 
 **Atomicity and transactions.** Each SQL statement passed to `HDB_Execute`
 that is not inside an explicit `BEGIN`/`COMMIT` block runs in its own
@@ -106,7 +137,7 @@ if not HDB_GetVersion then
 end
 
 local major, minor, patch = HDB_GetVersion()
--- e.g. 0, 1, 0
+-- e.g. 0, 3, 0
 ```
 
 ### Persistent addon storage (read/write)
@@ -150,7 +181,7 @@ local function MyAddon_DeleteNote(target)
 end
 
 -- Initialise on login
-local frame = CreateFrame("Frame")
+local frame = CreateFrame("Frame", "MyAddonFrame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:SetScript("OnEvent", MyAddon_InitDB)
 ```
@@ -206,6 +237,66 @@ for i = 1, table.getn(rows) do
 end
 
 HDB_Close(h)
+```
+
+### Async writes
+
+Use `HDB_ExecuteAsync` when you need to write data without freezing the game.
+Poll for the result across frames with an OnUpdate handler.
+
+```lua
+local db = HDB_Open("MyAddon.db")
+HDB_Execute(db, "CREATE TABLE IF NOT EXISTS log (ts TEXT, msg TEXT)")
+
+local pendingTicket
+
+local function MyAddon_LogAsync(message)
+    pendingTicket = HDB_ExecuteAsync(db,
+        "INSERT INTO log VALUES (datetime('now'), '" .. message .. "')")
+end
+
+local pollFrame = CreateFrame("Frame", "MyAddonPollFrame")
+pollFrame:SetScript("OnUpdate", function()
+    if not pendingTicket then return end
+    local result, err = HDB_GetResult(pendingTicket)
+    if result == nil and err == nil then return end  -- still pending
+    if err then
+        DEFAULT_CHAT_FRAME:AddMessage("Write failed: " .. err)
+        HDB_ClearPoison(db)
+    end
+    pendingTicket = nil
+end)
+```
+
+### Async queries
+
+`HDB_QueryAsync` and `HDB_QueryRawAsync` work the same way. The result
+structure matches the synchronous equivalents once retrieved.
+
+```lua
+local questDb = HDB_OpenAddon("MyAddon", "data/quests.db")
+local searchTicket
+
+local function MyAddon_SearchQuestsAsync(zone)
+    searchTicket = HDB_QueryAsync(questDb,
+        "SELECT id, title FROM quests WHERE zone='" .. zone .. "'")
+end
+
+local resultFrame = CreateFrame("Frame", "MyAddonResultFrame")
+resultFrame:SetScript("OnUpdate", function()
+    if not searchTicket then return end
+    local rows, err = HDB_GetResult(searchTicket)
+    if rows == nil and err == nil then return end  -- still pending
+    searchTicket = nil
+    if err then
+        DEFAULT_CHAT_FRAME:AddMessage("Query failed: " .. err)
+        HDB_ClearPoison(questDb)
+        return
+    end
+    for i = 1, table.getn(rows) do
+        DEFAULT_CHAT_FRAME:AddMessage(rows[i].id .. ": " .. rows[i].title)
+    end
+end)
 ```
 
 ## Installation
