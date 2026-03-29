@@ -63,6 +63,22 @@ fn free_handle(h: usize) {
     }
 }
 
+/// Close all open handles and reset async state.
+/// Called on UI reload so stale handles from the previous Lua session
+/// do not permanently occupy slots.
+pub fn reset_all() {
+    {
+        let mut handles = HANDLES.lock().unwrap();
+        for (i, slot) in handles.iter_mut().enumerate() {
+            if slot.is_some() {
+                crate::async_worker::cancel_handle(i + 1);
+                *slot = None;
+            }
+        }
+    }
+    crate::async_worker::reset();
+}
+
 // ---------------------------------------------------------------------------
 // Path helpers (Windows-only)
 // ---------------------------------------------------------------------------

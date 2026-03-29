@@ -217,3 +217,10 @@ pub fn is_poisoned(handle_id: usize) -> bool {
 pub fn cancel_handle(handle_id: usize) {
     POISONED.lock().unwrap().insert(handle_id);
 }
+
+/// Clear all completed results and poison state.
+/// Called on UI reload to prevent stale data from leaking across sessions.
+pub fn reset() {
+    RESULTS.lock().unwrap().clear();
+    POISONED.lock().unwrap().clear();
+}
