@@ -786,8 +786,17 @@ pub unsafe fn pump_callbacks() {
         let pcall_result = lua::lua_pcall(l, nargs, 0, 0);
 
         if pcall_result != 0 {
-            // pcall failed; pop the error message from the stack
+            // pcall failed; read the error, log it, and pop it
+            let err = lua::lua_tostring(l, -1)
+                .unwrap_or_else(|| "(non-string error)".to_string());
             lua::lua_settop(l, lua::lua_gettop(l) - 1);
+            let msg = format!("HDB_Pump: callback error (ticket {}): {}\n", _ticket, err);
+            let _ = std::fs::create_dir("Logs");
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("Logs/hdb_pump_errors.log")
+                .and_then(|mut f| std::io::Write::write_all(&mut f, msg.as_bytes()));
         }
 
         // Release the callback reference
