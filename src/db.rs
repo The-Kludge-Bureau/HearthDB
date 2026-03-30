@@ -145,6 +145,49 @@ fn value_to_string(v: Value) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Lua table push helpers (shared by HDB_GetResult and pump_callbacks)
+// ---------------------------------------------------------------------------
+
+unsafe fn push_query_rows(l: lua::LuaState, rows: &[Vec<(String, Option<String>)>]) {
+    lua::lua_newtable(l);
+    for (row_idx, row) in rows.iter().enumerate() {
+        lua::lua_newtable(l);
+        for (col_name, val) in row {
+            lua::lua_pushstring(l, col_name);
+            match val {
+                Some(s) => lua::lua_pushstring(l, s),
+                None    => lua::lua_pushnil(l),
+            }
+            lua::lua_settable(l, -3);
+        }
+        lua::lua_rawseti(l, -2, (row_idx + 1) as i32);
+    }
+}
+
+unsafe fn push_query_raw_cols(l: lua::LuaState, cols: &[String]) {
+    lua::lua_newtable(l);
+    for (i, name) in cols.iter().enumerate() {
+        lua::lua_pushstring(l, name);
+        lua::lua_rawseti(l, -2, (i + 1) as i32);
+    }
+}
+
+unsafe fn push_query_raw_rows(l: lua::LuaState, rows: &[Vec<Option<String>>]) {
+    lua::lua_newtable(l);
+    for (row_idx, row) in rows.iter().enumerate() {
+        lua::lua_newtable(l);
+        for (col_idx, val) in row.iter().enumerate() {
+            match val {
+                Some(s) => lua::lua_pushstring(l, s),
+                None    => lua::lua_pushnil(l),
+            }
+            lua::lua_rawseti(l, -2, (col_idx + 1) as i32);
+        }
+        lua::lua_rawseti(l, -2, (row_idx + 1) as i32);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Lua script functions
 // ---------------------------------------------------------------------------
 
@@ -666,41 +709,13 @@ pub unsafe extern "fastcall" fn script_hdb_get_result(_l: LuaState) -> u32 {
             lua::lua_pushnumber(l, rows_affected as f64);
             1
         }
-        Some(AsyncResult::Query { rows }) => {
-            lua::lua_newtable(l);
-            for (row_idx, row) in rows.iter().enumerate() {
-                lua::lua_newtable(l);
-                for (col_name, val) in row {
-                    lua::lua_pushstring(l, col_name);
-                    match val {
-                        Some(s) => lua::lua_pushstring(l, s),
-                        None    => lua::lua_pushnil(l),
-                    }
-                    lua::lua_settable(l, -3);
-                }
-                lua::lua_rawseti(l, -2, (row_idx + 1) as i32);
-            }
+        Some(AsyncResult::Query { ref rows }) => {
+            push_query_rows(l, rows);
             1
         }
-        Some(AsyncResult::QueryRaw { cols, rows }) => {
-            lua::lua_newtable(l);
-            for (i, name) in cols.iter().enumerate() {
-                lua::lua_pushstring(l, name);
-                lua::lua_rawseti(l, -2, (i + 1) as i32);
-            }
-
-            lua::lua_newtable(l);
-            for (row_idx, row) in rows.iter().enumerate() {
-                lua::lua_newtable(l);
-                for (col_idx, val) in row.iter().enumerate() {
-                    match val {
-                        Some(s) => lua::lua_pushstring(l, s),
-                        None    => lua::lua_pushnil(l),
-                    }
-                    lua::lua_rawseti(l, -2, (col_idx + 1) as i32);
-                }
-                lua::lua_rawseti(l, -2, (row_idx + 1) as i32);
-            }
+        Some(AsyncResult::QueryRaw { ref cols, ref rows }) => {
+            push_query_raw_cols(l, cols);
+            push_query_raw_rows(l, rows);
             2
         }
         Some(AsyncResult::Error { message }) => {
@@ -710,6 +725,65 @@ pub unsafe extern "fastcall" fn script_hdb_get_result(_l: LuaState) -> u32 {
             2
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Callback pump (called by HDB_Pump every frame)
+// ---------------------------------------------------------------------------
+
+pub unsafe fn pump_callbacks() {
+    let ready = crate::async_worker::ready_callbacks();
+    if ready.is_empty() {
+        return;
+    }
+
+    let l = lua::get_lua_state();
+
+    for (_ticket, result, cb) in ready {
+        // Push the callback function from the Lua registry
+        lua::lua_rawgeti(l, lua::LUA_REGISTRYINDEX, cb.lua_ref);
+
+        // Push arguments and call based on result type
+        let nargs = match result {
+            crate::async_worker::AsyncResult::Execute { rows_affected } => {
+                lua::lua_pushnumber(l, rows_affected as f64);
+                lua::lua_pushnil(l);
+                2
+            }
+            crate::async_worker::AsyncResult::Query { ref rows } => {
+                push_query_rows(l, rows);
+                lua::lua_pushnil(l);
+                2
+            }
+            crate::async_worker::AsyncResult::QueryRaw { ref cols, ref rows } => {
+                push_query_raw_cols(l, cols);
+                push_query_raw_rows(l, rows);
+                lua::lua_pushnil(l);
+                3
+            }
+            crate::async_worker::AsyncResult::Error { ref message } => {
+                lua::lua_pushnil(l);
+                lua::lua_pushstring(l, message);
+                2
+            }
+        };
+
+        // Protected call
+        let pcall_result = lua::lua_pcall(l, nargs, 0, 0);
+
+        if pcall_result != 0 {
+            // pcall failed; pop the error message from the stack
+            lua::lua_settop(l, lua::lua_gettop(l) - 1);
+        }
+
+        // Release the callback reference
+        lua::lual_unref(l, lua::LUA_REGISTRYINDEX, cb.lua_ref);
+    }
+}
+
+pub unsafe extern "fastcall" fn script_hdb_pump(_l: LuaState) -> u32 {
+    pump_callbacks();
+    0
 }
 
 pub unsafe extern "fastcall" fn script_hdb_clear_poison(_l: LuaState) -> u32 {
