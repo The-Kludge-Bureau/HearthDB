@@ -39,9 +39,9 @@ receive a ticket number, and poll for the result across frames.
 
 | Function | Signature | Description |
 |---|---|---|
-| `HDB_ExecuteAsync` | `HDB_ExecuteAsync(handle, sql) -> ticket` | Submits one or more non-SELECT statements for background execution. Returns a ticket number. Raises a Lua error if the handle is invalid or poisoned. |
-| `HDB_QueryAsync` | `HDB_QueryAsync(handle, sql) -> ticket` | Submits a SELECT for background execution. The result, once ready, has the same structure as `HDB_Query`. |
-| `HDB_QueryRawAsync` | `HDB_QueryRawAsync(handle, sql) -> ticket` | Submits a SELECT for background execution. The result, once ready, has the same two-value structure as `HDB_QueryRaw`. |
+| `HDB_ExecuteAsync` | `HDB_ExecuteAsync(handle, sql [, callback]) -> ticket` | Submits one or more non-SELECT statements for background execution. Returns a ticket number. If `callback` is provided, it is called with `(rows_affected, err)` when the operation completes. Raises a Lua error if the handle is invalid or poisoned. |
+| `HDB_QueryAsync` | `HDB_QueryAsync(handle, sql [, callback]) -> ticket` | Submits a SELECT for background execution. If `callback` is provided, it is called with `(rows, err)` matching the `HDB_Query` result structure. |
+| `HDB_QueryRawAsync` | `HDB_QueryRawAsync(handle, sql [, callback]) -> ticket` | Submits a SELECT for background execution. If `callback` is provided, it is called with `(cols, rows, err)` matching the `HDB_QueryRaw` result structure. |
 | `HDB_GetResult` | `HDB_GetResult(ticket) -> ...` | Polls for a completed async result. Returns `nil` if still pending. For execute results, returns `rows_affected`. For query results, returns the same structure as the sync equivalent. For errors, returns `nil, error_message`. Results are one-shot: a second call with the same ticket returns `nil`. |
 | `HDB_ClearPoison` | `HDB_ClearPoison(handle)` | Clears the poison state on a handle after an async error has been retrieved. Without this, the handle cannot be used for further async operations. |
 
@@ -74,6 +74,18 @@ submissions on that handle are rejected and any already-queued work for it is
 cancelled. To recover, retrieve the error result with `HDB_GetResult`, then
 call `HDB_ClearPoison(handle)`. Synchronous functions (`HDB_Execute`,
 `HDB_Query`, `HDB_QueryRaw`) are not affected by poison.
+
+**Callbacks.** Pass a function as the optional third argument to any
+`*Async` function to receive results automatically instead of polling.
+The callback fires on the next frame after the operation completes.
+Callback signatures mirror the sync return values with an added `err`
+parameter: `function(rows_affected, err)` for execute,
+`function(rows, err)` for query, and `function(cols, rows, err)` for
+query raw. On success `err` is `nil`; on failure the result is `nil` and
+`err` is a string. The ticket is still returned when a callback is
+provided, but `HDB_GetResult` will return `nil` for that ticket since
+the callback consumes the result. Errors inside callbacks are caught and
+logged to `Logs/hdb_pump_errors.log` without affecting other callbacks.
 
 **Atomicity and transactions.** Each SQL statement passed to `HDB_Execute`
 that is not inside an explicit `BEGIN`/`COMMIT` block runs in its own
@@ -137,7 +149,7 @@ if not HDB_GetVersion then
 end
 
 local major, minor, patch = HDB_GetVersion()
--- e.g. 0, 3, 0
+-- e.g. 0, 4, 0
 ```
 
 ### Persistent addon storage (read/write)
@@ -239,10 +251,54 @@ end
 HDB_Close(h)
 ```
 
-### Async writes
+### Async writes with callback
 
-Use `HDB_ExecuteAsync` when you need to write data without freezing the game.
-Poll for the result across frames with an OnUpdate handler.
+Use `HDB_ExecuteAsync` with a callback when you need to write data
+without freezing the game and without polling.
+
+```lua
+local db = HDB_Open("MyAddon.db")
+HDB_Execute(db, "CREATE TABLE IF NOT EXISTS log (ts TEXT, msg TEXT)")
+
+local function MyAddon_LogAsync(message)
+    HDB_ExecuteAsync(db,
+        "INSERT INTO log VALUES (datetime('now'), '" .. message .. "')",
+        function(rows_affected, err)
+            if err then
+                DEFAULT_CHAT_FRAME:AddMessage("Write failed: " .. err)
+                HDB_ClearPoison(db)
+                return
+            end
+            DEFAULT_CHAT_FRAME:AddMessage("Logged (" .. rows_affected .. " row)")
+        end)
+end
+```
+
+### Async queries with callback
+
+```lua
+local questDb = HDB_OpenAddon("MyAddon", "data/quests.db")
+
+local function MyAddon_SearchQuestsAsync(zone)
+    HDB_QueryAsync(questDb,
+        "SELECT id, title FROM quests WHERE zone='" .. zone .. "'",
+        function(rows, err)
+            if err then
+                DEFAULT_CHAT_FRAME:AddMessage("Query failed: " .. err)
+                HDB_ClearPoison(questDb)
+                return
+            end
+            for i = 1, table.getn(rows) do
+                DEFAULT_CHAT_FRAME:AddMessage(rows[i].id .. ": " .. rows[i].title)
+            end
+        end)
+end
+```
+
+### Async polling (without callbacks)
+
+If you prefer manual control, omit the callback and poll with
+`HDB_GetResult` from an OnUpdate handler.
 
 ```lua
 local db = HDB_Open("MyAddon.db")
@@ -265,37 +321,6 @@ pollFrame:SetScript("OnUpdate", function()
         HDB_ClearPoison(db)
     end
     pendingTicket = nil
-end)
-```
-
-### Async queries
-
-`HDB_QueryAsync` and `HDB_QueryRawAsync` work the same way. The result
-structure matches the synchronous equivalents once retrieved.
-
-```lua
-local questDb = HDB_OpenAddon("MyAddon", "data/quests.db")
-local searchTicket
-
-local function MyAddon_SearchQuestsAsync(zone)
-    searchTicket = HDB_QueryAsync(questDb,
-        "SELECT id, title FROM quests WHERE zone='" .. zone .. "'")
-end
-
-local resultFrame = CreateFrame("Frame", "MyAddonResultFrame")
-resultFrame:SetScript("OnUpdate", function()
-    if not searchTicket then return end
-    local rows, err = HDB_GetResult(searchTicket)
-    if rows == nil and err == nil then return end  -- still pending
-    searchTicket = nil
-    if err then
-        DEFAULT_CHAT_FRAME:AddMessage("Query failed: " .. err)
-        HDB_ClearPoison(questDb)
-        return
-    end
-    for i = 1, table.getn(rows) do
-        DEFAULT_CHAT_FRAME:AddMessage(rows[i].id .. ": " .. rows[i].title)
-    end
 end)
 ```
 
