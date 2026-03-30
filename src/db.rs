@@ -501,9 +501,15 @@ pub unsafe extern "fastcall" fn script_hdb_execute_async(_l: LuaState) -> u32 {
     use crate::async_worker;
 
     let l = lua::get_lua_state();
+    let nargs = lua::lua_gettop(l);
 
-    if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
-        lua::lua_error(l, "Usage: HDB_ExecuteAsync(handle, sql)");
+    if nargs < 2 || nargs > 3 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
+        lua::lua_error(l, "Usage: HDB_ExecuteAsync(handle, sql[, callback])");
+        return 0;
+    }
+
+    if nargs == 3 && !lua::lua_isfunction(l, 3) {
+        lua::lua_error(l, "HDB_ExecuteAsync: argument 3 must be a function");
         return 0;
     }
 
@@ -526,6 +532,10 @@ pub unsafe extern "fastcall" fn script_hdb_execute_async(_l: LuaState) -> u32 {
 
     match async_worker::submit(h, conn, async_worker::AsyncOp::Execute(sql)) {
         Ok(ticket) => {
+            if nargs == 3 {
+                let cb_ref = lua::lual_ref(l, lua::LUA_REGISTRYINDEX);
+                async_worker::register_callback(ticket, cb_ref, async_worker::CallbackType::Execute, h);
+            }
             lua::lua_pushnumber(l, ticket as f64);
             1
         }
@@ -540,9 +550,15 @@ pub unsafe extern "fastcall" fn script_hdb_query_async(_l: LuaState) -> u32 {
     use crate::async_worker;
 
     let l = lua::get_lua_state();
+    let nargs = lua::lua_gettop(l);
 
-    if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
-        lua::lua_error(l, "Usage: HDB_QueryAsync(handle, sql)");
+    if nargs < 2 || nargs > 3 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
+        lua::lua_error(l, "Usage: HDB_QueryAsync(handle, sql[, callback])");
+        return 0;
+    }
+
+    if nargs == 3 && !lua::lua_isfunction(l, 3) {
+        lua::lua_error(l, "HDB_QueryAsync: argument 3 must be a function");
         return 0;
     }
 
@@ -565,6 +581,10 @@ pub unsafe extern "fastcall" fn script_hdb_query_async(_l: LuaState) -> u32 {
 
     match async_worker::submit(h, conn, async_worker::AsyncOp::Query(sql)) {
         Ok(ticket) => {
+            if nargs == 3 {
+                let cb_ref = lua::lual_ref(l, lua::LUA_REGISTRYINDEX);
+                async_worker::register_callback(ticket, cb_ref, async_worker::CallbackType::Query, h);
+            }
             lua::lua_pushnumber(l, ticket as f64);
             1
         }
@@ -579,9 +599,15 @@ pub unsafe extern "fastcall" fn script_hdb_query_raw_async(_l: LuaState) -> u32 
     use crate::async_worker;
 
     let l = lua::get_lua_state();
+    let nargs = lua::lua_gettop(l);
 
-    if lua::lua_gettop(l) != 2 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
-        lua::lua_error(l, "Usage: HDB_QueryRawAsync(handle, sql)");
+    if nargs < 2 || nargs > 3 || !lua::lua_isnumber(l, 1) || !lua::lua_isstring(l, 2) {
+        lua::lua_error(l, "Usage: HDB_QueryRawAsync(handle, sql[, callback])");
+        return 0;
+    }
+
+    if nargs == 3 && !lua::lua_isfunction(l, 3) {
+        lua::lua_error(l, "HDB_QueryRawAsync: argument 3 must be a function");
         return 0;
     }
 
@@ -604,6 +630,10 @@ pub unsafe extern "fastcall" fn script_hdb_query_raw_async(_l: LuaState) -> u32 
 
     match async_worker::submit(h, conn, async_worker::AsyncOp::QueryRaw(sql)) {
         Ok(ticket) => {
+            if nargs == 3 {
+                let cb_ref = lua::lual_ref(l, lua::LUA_REGISTRYINDEX);
+                async_worker::register_callback(ticket, cb_ref, async_worker::CallbackType::QueryRaw, h);
+            }
             lua::lua_pushnumber(l, ticket as f64);
             1
         }
