@@ -31,6 +31,19 @@ pub enum AsyncResult {
     Error { message: String },
 }
 
+#[derive(Clone, Copy)]
+pub enum CallbackType {
+    Execute,
+    Query,
+    QueryRaw,
+}
+
+pub struct PendingCallback {
+    pub lua_ref: i32,
+    pub cb_type: CallbackType,
+    pub handle_id: usize,
+}
+
 // ---------------------------------------------------------------------------
 // Global state
 // ---------------------------------------------------------------------------
@@ -41,6 +54,8 @@ static RESULTS: LazyLock<Mutex<HashMap<u64, AsyncResult>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static POISONED: LazyLock<Mutex<HashSet<usize>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
+static CALLBACKS: LazyLock<Mutex<HashMap<u64, PendingCallback>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 // ---------------------------------------------------------------------------
 // Query execution helpers
@@ -218,9 +233,51 @@ pub fn cancel_handle(handle_id: usize) {
     POISONED.lock().unwrap().insert(handle_id);
 }
 
-/// Clear all completed results and poison state.
+pub fn register_callback(ticket: u64, lua_ref: i32, cb_type: CallbackType, handle_id: usize) {
+    CALLBACKS.lock().unwrap().insert(ticket, PendingCallback { lua_ref, cb_type, handle_id });
+}
+
+/// Returns all tickets that have both a completed result and a registered callback.
+pub fn ready_callbacks() -> Vec<(u64, AsyncResult, PendingCallback)> {
+    let mut results = RESULTS.lock().unwrap();
+    let mut callbacks = CALLBACKS.lock().unwrap();
+    let tickets: Vec<u64> = callbacks.keys()
+        .filter(|t| results.contains_key(t))
+        .copied()
+        .collect();
+    let mut ready = Vec::new();
+    for ticket in tickets {
+        if let (Some(result), Some(cb)) = (results.remove(&ticket), callbacks.remove(&ticket)) {
+            ready.push((ticket, result, cb));
+        }
+    }
+    ready
+}
+
+/// Remove all callbacks for a specific handle. Returns the Lua refs to release.
+pub fn cancel_handle_callbacks(handle_id: usize) -> Vec<i32> {
+    let mut callbacks = CALLBACKS.lock().unwrap();
+    let mut refs = Vec::new();
+    callbacks.retain(|_, cb| {
+        if cb.handle_id == handle_id {
+            refs.push(cb.lua_ref);
+            false
+        } else {
+            true
+        }
+    });
+    refs
+}
+
+/// Clear all completed results, poison state, and callbacks.
 /// Called on UI reload to prevent stale data from leaking across sessions.
-pub fn reset() {
+/// Returns the Lua refs from any stale callbacks so the caller can release them.
+pub fn reset() -> Vec<i32> {
     RESULTS.lock().unwrap().clear();
     POISONED.lock().unwrap().clear();
+    let stale_refs: Vec<i32> = CALLBACKS.lock().unwrap()
+        .drain()
+        .map(|(_, cb)| cb.lua_ref)
+        .collect();
+    stale_refs
 }
