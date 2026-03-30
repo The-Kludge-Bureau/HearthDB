@@ -22,3 +22,13 @@ pub const LUA_PUSHBOOLEAN: usize = 0x006F_39F0;
 pub const LUA_NEWTABLE:    usize = 0x006F_3C90;
 pub const LUA_SETTABLE:    usize = 0x006F_3E20;
 pub const LUA_RAWSETI:     usize = 0x006F_3F60;
+pub const LUA_TYPE:        usize = 0x006F_3400;
+pub const LUA_PCALL:       usize = 0x006F_41A0;
+pub const LUA_RAWGETI:     usize = 0x006F_3BC0;
+pub const LUAL_REF:        usize = 0x006F_5310;
+pub const LUAL_UNREF:      usize = 0x006F_5400;
+
+/// WoW-specific function that compiles and executes a Lua string.
+/// NOT the standard Lua C API lua_call.
+/// Signature: void __fastcall(const char *code, const char *source)
+pub const LUA_CALL:        usize = 0x0070_4CD0;

@@ -96,6 +96,60 @@ pub unsafe fn lua_rawseti(l: LuaState, t: i32, n: i32) {
     f(l, t, n);
 }
 
+pub const LUA_REGISTRYINDEX: i32 = -10000;
+pub const LUA_TFUNCTION: i32 = 6;
+pub const LUA_REFNIL: i32 = -2;
+
+pub unsafe fn lua_type(l: LuaState, idx: i32) -> i32 {
+    let f: unsafe extern "fastcall" fn(LuaState, i32) -> i32 =
+        std::mem::transmute(offsets::LUA_TYPE);
+    f(l, idx)
+}
+
+pub unsafe fn lua_isfunction(l: LuaState, idx: i32) -> bool {
+    lua_type(l, idx) == LUA_TFUNCTION
+}
+
+pub unsafe fn lua_pcall(l: LuaState, nargs: i32, nresults: i32, errfunc: i32) -> i32 {
+    let f: unsafe extern "fastcall" fn(LuaState, i32, i32, i32) -> i32 =
+        std::mem::transmute(offsets::LUA_PCALL);
+    f(l, nargs, nresults, errfunc)
+}
+
+pub unsafe fn lua_rawgeti(l: LuaState, t: i32, n: i32) {
+    let f: unsafe extern "fastcall" fn(LuaState, i32, i32) =
+        std::mem::transmute(offsets::LUA_RAWGETI);
+    f(l, t, n);
+}
+
+pub unsafe fn lual_ref(l: LuaState, t: i32) -> i32 {
+    let f: unsafe extern "fastcall" fn(LuaState, i32) -> i32 =
+        std::mem::transmute(offsets::LUAL_REF);
+    f(l, t)
+}
+
+pub unsafe fn lual_unref(l: LuaState, t: i32, r: i32) {
+    let f: unsafe extern "fastcall" fn(LuaState, i32, i32) =
+        std::mem::transmute(offsets::LUAL_UNREF);
+    f(l, t, r);
+}
+
+pub unsafe fn lua_settop(l: LuaState, idx: i32) {
+    let f: unsafe extern "fastcall" fn(LuaState, i32) =
+        std::mem::transmute(offsets::LUA_SETTOP);
+    f(l, idx);
+}
+
+/// Compiles and executes a Lua string. This is a WoW-specific function,
+/// NOT the standard Lua C API lua_call.
+pub unsafe fn lua_call_string(code: &str, source: &str) {
+    let c_code = CString::new(code).unwrap_or_default();
+    let c_source = CString::new(source).unwrap_or_default();
+    let f: unsafe extern "fastcall" fn(*const i8, *const i8) =
+        std::mem::transmute(offsets::LUA_CALL);
+    f(c_code.as_ptr(), c_source.as_ptr());
+}
+
 pub unsafe fn register_lua_function(name: &str, func: *mut usize) {
     let cs = CString::new(name).unwrap_or_default();
     let f: unsafe extern "fastcall" fn(*const i8, *mut usize) =
