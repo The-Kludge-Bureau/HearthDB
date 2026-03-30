@@ -1,5 +1,7 @@
 //! Background worker thread for async HDB_* operations.
 
+#![allow(dead_code)]
+
 use crate::db::{Handle, SendConnection};
 use rusqlite::types::Value;
 use std::collections::{HashMap, HashSet};

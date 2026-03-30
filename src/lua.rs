@@ -5,6 +5,8 @@
 //! The Lua state is represented as *mut usize to match the client's
 //! non-standard embedding, consistent with how nampower handles it.
 
+#![allow(dead_code)]
+
 use crate::offsets;
 use std::ffi::{CStr, CString};
 
