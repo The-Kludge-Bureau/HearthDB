@@ -76,7 +76,9 @@ fn is_valid_handle_number(n: f64) -> bool {
 /// Close all open handles and reset async state.
 /// Called on UI reload so stale handles from the previous Lua session
 /// do not permanently occupy slots.
-pub fn reset_all() {
+/// # Safety
+/// Must be called from the main thread where Lua state access is valid.
+pub unsafe fn reset_all() {
     {
         let mut handles = HANDLES.lock().unwrap();
         for (i, slot) in handles.iter_mut().enumerate() {
@@ -86,7 +88,13 @@ pub fn reset_all() {
             }
         }
     }
-    crate::async_worker::reset();
+    let stale_refs = crate::async_worker::reset();
+    if !stale_refs.is_empty() {
+        let l = lua::get_lua_state();
+        for r in stale_refs {
+            lua::lual_unref(l, lua::LUA_REGISTRYINDEX, r);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +281,12 @@ pub unsafe extern "fastcall" fn script_hdb_close(_l: LuaState) -> u32 {
     if !valid {
         lua::lua_error(l, "HDB_Close: invalid or already-closed handle");
         return 0;
+    }
+
+    // Release any pending callback refs for this handle
+    let stale_refs = crate::async_worker::cancel_handle_callbacks(h);
+    for r in stale_refs {
+        lua::lual_unref(l, lua::LUA_REGISTRYINDEX, r);
     }
 
     // Poison the handle so the worker skips any remaining queued work
